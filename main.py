@@ -3,7 +3,7 @@ import json
 import requests
 import time
 import psycopg2
-# import pgdb
+from decouple import config
 
 class Database:
     def __init__(self, conn) -> None:
@@ -541,44 +541,16 @@ class WordBankManagement:
         return self.__list_of_words
 
 if __name__ == '__main__':
-    user_name_api = 'carlos.primo'
-    password_api = '50dae2798da448b19d55dd7507e51d9f'
-    hostname_db = 'ohio-postgres.render.com'
-    username_db = 'caprimo'
-    password_db = '44RlIq7K3IYVXicpXeSlTt5rIAGwrq3n'
-    dbname = 'wordle_game_db'
-    api_get_url = 'https://7b8uflffq0.execute-api.us-east-1.amazonaws.com/game/get_params'
-    api_post_url = 'https://7b8uflffq0.execute-api.us-east-1.amazonaws.com/game/check_results'
+    user_name_api = config('USERNAME_API')
+    password_api = config('PASSWORD_API')
+    api_get_url = config('URL_API_GET')
+    api_post_url = config('URL_API_POST')
+    hostname_db = config('POSTGRESQL_HOSTNAME')
+    username_db = config('POSTGRESQL_USERNAME')
+    password_db = config('POSTGRESQL_PASSWORD')
+    dbname = config('POSTGRESQL_DBNAME')
+
     Play(
         user_name_api, password_api, 
         hostname_db, username_db, password_db, dbname,
         api_get_url, api_post_url)
-    # initial_application_time = time.time()
-    # word_bank_management = WordBankManagement()
-    # # Create a list of words
-    # word_bank_management.create_list_of_words(
-    #     r'C:\Users\carlo\Documents\WordleGame\bancoPalabrasCarlos.txt'
-    # )
-    # wordlist = word_bank_management.get_list_of_words()
-    # # Create a wordle game
-    # wordle_game = WordleGame(wordlist)
-    # play = Play(wordle_game, 'carlos.primo', '50dae2798da448b19d55dd7507e51d9f')
-    # # Initialize the game
-    # initial_time_find_word = time.time()
-    # word_data = play.init_game(
-    #     'https://7b8uflffq0.execute-api.us-east-1.amazonaws.com/game/get_params'
-    # )
-    # print(word_data)
-    # length_target_word = word_data.get('length_word')
-    # number_of_vowels = word_data.get('vowels')
-    # number_of_consonants = word_data.get('consonants')
-    # # Play the game and find the target word
-    # play.find_word(length_target_word, number_of_vowels, number_of_consonants)
-    # final_application_time = time.time()
-    # total_application_time = final_application_time - initial_application_time
-    # total_time_find_word = final_application_time - initial_time_find_word
-    # print('')
-    # print(
-    #     f'The total time for the execution of the application is {total_application_time} seconds'
-    # )
-    # print(f'The total time to find the word is {total_time_find_word} seconds')
