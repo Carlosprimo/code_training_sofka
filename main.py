@@ -2,6 +2,12 @@ import copy
 import json
 import requests
 import time
+import psycopg2
+# import pgdb
+
+class Database:
+    def __init__(self, conn) -> None:
+        self.conn = conn
 
 class WordleGame:
     def __init__(self, list_of_words: list) -> None:
@@ -369,19 +375,28 @@ class AuxiliaryFunctions:
 
 class Play:
     def __init__(
-            self, wordle_game: WordleGame, user_name: str, password: str) -> None:
+            self, user_name_api: str, password_api: str, hostname_db: str, 
+            username_db: str, password_db: str, dbname: str, api_get_url :str,
+            api_post_url: str) -> None:
         """Play class constructor
 
         Args:
-            wordle_game (WordleGame): Wordle game
             user_name (str): API account username
             password (str): API account password
-        """
-        self.wordle_game = wordle_game
-        self.session = requests.Session()
-        self.session.auth = (user_name, password)
 
-    def init_game(self, url: str) -> json:
+        """
+        session = requests.Session()
+        session.auth = (user_name_api, password_api)
+        connection = psycopg2.connect(
+            host=hostname_db,
+            user=username_db,
+            password=password_db,
+            dbname=dbname
+        )
+        self.wordle_game = None
+        self.play(session, connection, api_get_url, api_post_url)
+
+    def init_game(self, url: str, session) -> json:
         """Init the game by making the API request
 
         Args:
@@ -390,12 +405,12 @@ class Play:
         Returns:
             json: API response in json format
         """
-        response = self.session.get(url)
+        response = session.get(url)
         return response.json()
 
     def find_word(
             self, length_target_word: int, number_vowels: int, 
-            number_consonants: int) -> None:
+            number_consonants: int, api_post_url: str, session) -> None:
         """Find the target word
 
         Args:
@@ -410,7 +425,7 @@ class Play:
         first_attempt = self.wordle_game.select_word(
             possible_initial_words, length_target_word
         )
-        attempt_data = self.send_word(first_attempt)
+        attempt_data = self.send_word(first_attempt, api_post_url, session)
         attempt_word = attempt_data.get('word_sent')
         attempt_count = 0
         possible_words = copy.deepcopy(possible_initial_words)
@@ -439,7 +454,7 @@ class Play:
                 attempt_word = copy.deepcopy(
                     self.wordle_game.select_word(possible_words, length_target_word)
                 )
-                attempt_data = copy.deepcopy(self.send_word(attempt_word))
+                attempt_data = copy.deepcopy(self.send_word(attempt_word, api_post_url, session))
                 position_array = copy.deepcopy(attempt_data.get('position_array'))
                 right_letters_in_wrong_positions = copy.deepcopy(
                     attempt_data.get("right_letters_in_wrong_positions")
@@ -447,7 +462,7 @@ class Play:
                 currrent_attempt = copy.deepcopy(attempt_data.get('current_attemps'))
             attempt_count += 1
 
-    def send_word(self, word: str) -> json:
+    def send_word(self, word: str, api_post_url: str, session) -> json:
         """Sends the selected word to the API to verify if it is correct
 
         Args:
@@ -457,12 +472,39 @@ class Play:
             json: API response when sending a word
         """
         data = {'result_word': word}
-        response = self.session.post(
-            'https://7b8uflffq0.execute-api.us-east-1.amazonaws.com/game/check_results',
-            json=data,
-        )
+        response = session.post(api_post_url,json=data)
         return response.json()
 
+    def play(
+        self, session, connection, api_get_url: str, api_post_url: str) -> None:
+        initial_application_time = time.time()
+        word_bank_management = WordBankManagement()
+        # Create a list of words
+        word_bank_management.create_list_of_words(
+            r'C:\Users\carlo\Documents\WordleGame\bancoPalabrasCarlos.txt'
+        )
+        wordlist = word_bank_management.get_list_of_words()
+        # Create a wordle game
+        wordle_game = WordleGame(wordlist)
+        self.wordle_game = wordle_game
+        # # Initialize the game
+        initial_time_find_word = time.time()
+        word_data = self.init_game(api_get_url, session)
+        print(word_data)
+        length_target_word = word_data.get('length_word')
+        number_of_vowels = word_data.get('vowels')
+        number_of_consonants = word_data.get('consonants')
+        # Play the game and find the target word
+        self.find_word(length_target_word, number_of_vowels, number_of_consonants, api_post_url, session)
+        final_application_time = time.time()
+        total_application_time = final_application_time - initial_application_time
+        total_time_find_word = final_application_time - initial_time_find_word
+        print('')
+        print(
+            f'The total time for the execution of the application is {total_application_time} seconds'
+        )
+        print(f'The total time to find the word is {total_time_find_word} seconds')
+    
 class WordBankManagement:
     def __init__(self) -> None:
         """WordBankManagement class constructor
@@ -499,33 +541,44 @@ class WordBankManagement:
         return self.__list_of_words
 
 if __name__ == '__main__':
-
-    initial_application_time = time.time()
-    word_bank_management = WordBankManagement()
-    # Create a list of words
-    word_bank_management.create_list_of_words(
-        r'C:\Users\carlo\Documents\WordleGame\bancoPalabrasCarlos.txt'
-    )
-    wordlist = word_bank_management.get_list_of_words()
-    # Create a wordle game
-    wordle_game = WordleGame(wordlist)
-    play = Play(wordle_game, 'carlos.primo', '50dae2798da448b19d55dd7507e51d9f')
-    # Initialize the game
-    initial_time_find_word = time.time()
-    word_data = play.init_game(
-        'https://7b8uflffq0.execute-api.us-east-1.amazonaws.com/game/get_params'
-    )
-    print(word_data)
-    length_target_word = word_data.get('length_word')
-    number_of_vowels = word_data.get('vowels')
-    number_of_consonants = word_data.get('consonants')
-    # Play the game and find the target word
-    play.find_word(length_target_word, number_of_vowels, number_of_consonants)
-    final_application_time = time.time()
-    total_application_time = final_application_time - initial_application_time
-    total_time_find_word = final_application_time - initial_time_find_word
-    print('')
-    print(
-        f'The total time for the execution of the application is {total_application_time} seconds'
-    )
-    print(f'The total time to find the word is {total_time_find_word} seconds')
+    user_name_api = 'carlos.primo'
+    password_api = '50dae2798da448b19d55dd7507e51d9f'
+    hostname_db = 'ohio-postgres.render.com'
+    username_db = 'caprimo'
+    password_db = '44RlIq7K3IYVXicpXeSlTt5rIAGwrq3n'
+    dbname = 'wordle_game_db'
+    api_get_url = 'https://7b8uflffq0.execute-api.us-east-1.amazonaws.com/game/get_params'
+    api_post_url = 'https://7b8uflffq0.execute-api.us-east-1.amazonaws.com/game/check_results'
+    Play(
+        user_name_api, password_api, 
+        hostname_db, username_db, password_db, dbname,
+        api_get_url, api_post_url)
+    # initial_application_time = time.time()
+    # word_bank_management = WordBankManagement()
+    # # Create a list of words
+    # word_bank_management.create_list_of_words(
+    #     r'C:\Users\carlo\Documents\WordleGame\bancoPalabrasCarlos.txt'
+    # )
+    # wordlist = word_bank_management.get_list_of_words()
+    # # Create a wordle game
+    # wordle_game = WordleGame(wordlist)
+    # play = Play(wordle_game, 'carlos.primo', '50dae2798da448b19d55dd7507e51d9f')
+    # # Initialize the game
+    # initial_time_find_word = time.time()
+    # word_data = play.init_game(
+    #     'https://7b8uflffq0.execute-api.us-east-1.amazonaws.com/game/get_params'
+    # )
+    # print(word_data)
+    # length_target_word = word_data.get('length_word')
+    # number_of_vowels = word_data.get('vowels')
+    # number_of_consonants = word_data.get('consonants')
+    # # Play the game and find the target word
+    # play.find_word(length_target_word, number_of_vowels, number_of_consonants)
+    # final_application_time = time.time()
+    # total_application_time = final_application_time - initial_application_time
+    # total_time_find_word = final_application_time - initial_time_find_word
+    # print('')
+    # print(
+    #     f'The total time for the execution of the application is {total_application_time} seconds'
+    # )
+    # print(f'The total time to find the word is {total_time_find_word} seconds')
