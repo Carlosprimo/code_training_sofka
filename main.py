@@ -1,5 +1,6 @@
 import copy
 import json
+from logging import exception
 import requests
 import time
 import psycopg2
@@ -8,6 +9,42 @@ from decouple import config
 class Database:
     def __init__(self, conn) -> None:
         self.conn = conn
+        self.cursor = self.conn.cursor()
+
+    def insert_data_game_table(self, data: tuple) -> None:
+        try:
+            cursor = self.cursor
+            insert_data_game_table_query = '''INSERT INTO game 
+            (game_id, length_word, vowels, consonants) VALUES (%s, %s, %s, %s);
+            '''
+            cursor.execute(insert_data_game_table_query, data)
+            self.conn.commit()
+        except:
+            print('No se pudo insertar los datos en la tabla game')
+
+    def update_data_game_table(self, data: tuple) -> None:
+        try:
+            add_datetime_gametable_query = '''UPDATE game SET time_to_find_word = %s, total_time = %s WHERE game_id = %s'''
+            cursor = self.cursor
+            cursor.execute(add_datetime_gametable_query, data)
+            self.conn.commit()
+        except:
+            print('No se puedo añadir los valores al tabla game')
+
+    def close_connection(self) -> None:
+        self.cursor.close()
+        self.conn.close()
+    
+    def insert_data_attempt_table(self, data: tuple) -> None:
+        try:
+            cursor = self.cursor
+            insert_data_attempt_table_query = '''INSERT INTO attempt
+            (game_id, score, date, time, position_array, right_letters_in_wrong_positions, current_attemps, word_sent) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            '''
+            cursor.execute(insert_data_attempt_table_query, data)
+            self.conn.commit()
+        except:
+            print('No se pudo añadir los datos a la tabla attempt')
 
 class WordleGame:
     def __init__(self, list_of_words: list) -> None:
@@ -377,7 +414,7 @@ class Play:
     def __init__(
             self, user_name_api: str, password_api: str, hostname_db: str, 
             username_db: str, password_db: str, dbname: str, api_get_url :str,
-            api_post_url: str) -> None:
+            api_post_url: str, initial_application_time) -> None:
         """Play class constructor
 
         Args:
@@ -394,7 +431,7 @@ class Play:
             dbname=dbname
         )
         self.wordle_game = None
-        self.play(session, connection, api_get_url, api_post_url)
+        self.play(session, connection, api_get_url, api_post_url, initial_application_time)
 
     def init_game(self, url: str, session) -> json:
         """Init the game by making the API request
@@ -410,7 +447,7 @@ class Play:
 
     def find_word(
             self, length_target_word: int, number_vowels: int, 
-            number_consonants: int, api_post_url: str, session) -> None:
+            number_consonants: int, api_post_url: str, session, game_id: str, database: Database) -> None:
         """Find the target word
 
         Args:
@@ -426,18 +463,27 @@ class Play:
             possible_initial_words, length_target_word
         )
         attempt_data = self.send_word(first_attempt, api_post_url, session)
-        attempt_word = attempt_data.get('word_sent')
+        attempt_word = attempt_data.get('word_sent') #1
         attempt_count = 0
         possible_words = copy.deepcopy(possible_initial_words)
-        position_array = attempt_data.get('position_array')
+        position_array = attempt_data.get('position_array')#2
         right_letters_in_wrong_positions = attempt_data.get(
             'right_letters_in_wrong_positions'
         )
-
-        currrent_attempt = attempt_data.get('current_attemps')
+        currrent_attempt_word = attempt_data.get('current_attemps')#4
         # Make the five attempts allowed by the game to find the word
         while attempt_count < 5:
-            print(f'Attempt {currrent_attempt}: {attempt_word}')
+            attempt_score =  attempt_data.get('score')
+            attempt_date = attempt_data.get('try_datetime').split('T')[0]
+            attempt_time = attempt_data.get('try_datetime').split('T')[1]
+            position_array_attempt =str(set(map(lambda pos: 1 if pos else 0,position_array)))
+            if len(right_letters_in_wrong_positions) > 0:        
+                right_letters_in_wrong_positions_set = str(set(right_letters_in_wrong_positions))
+            else:
+                right_letters_in_wrong_positions_set = str({})
+            data_attempt_table = (game_id, attempt_score, attempt_date, attempt_time, position_array_attempt, right_letters_in_wrong_positions_set, currrent_attempt_word, attempt_word)        
+            database.insert_data_attempt_table(data_attempt_table)
+            print(f'Attempt {currrent_attempt_word}: {attempt_word}')
             print(attempt_data)
             if attempt_data.get('score') == 1.0:
                 print(f'Word found: {attempt_word}')
@@ -459,7 +505,7 @@ class Play:
                 right_letters_in_wrong_positions = copy.deepcopy(
                     attempt_data.get("right_letters_in_wrong_positions")
                 )
-                currrent_attempt = copy.deepcopy(attempt_data.get('current_attemps'))
+                currrent_attempt_word = copy.deepcopy(attempt_data.get('current_attemps'))
             attempt_count += 1
 
     def send_word(self, word: str, api_post_url: str, session) -> json:
@@ -476,8 +522,7 @@ class Play:
         return response.json()
 
     def play(
-        self, session, connection, api_get_url: str, api_post_url: str) -> None:
-        initial_application_time = time.time()
+        self, session, connection, api_get_url: str, api_post_url: str, initial_application_time) -> None:
         word_bank_management = WordBankManagement()
         # Create a list of words
         word_bank_management.create_list_of_words(
@@ -491,20 +536,27 @@ class Play:
         initial_time_find_word = time.time()
         word_data = self.init_game(api_get_url, session)
         print(word_data)
+        id_target_word = word_data.get('id')
         length_target_word = word_data.get('length_word')
         number_of_vowels = word_data.get('vowels')
         number_of_consonants = word_data.get('consonants')
+        database = Database(connection)
+        data = (id_target_word, length_target_word, number_of_vowels,         number_of_consonants)
+        database.insert_data_game_table(data)
         # Play the game and find the target word
-        self.find_word(length_target_word, number_of_vowels, number_of_consonants, api_post_url, session)
+        self.find_word(length_target_word, number_of_vowels, number_of_consonants, api_post_url, session, id_target_word, database)
         final_application_time = time.time()
-        total_application_time = final_application_time - initial_application_time
         total_time_find_word = final_application_time - initial_time_find_word
+        total_application_time = final_application_time - initial_application_time
+        print(f'The total time to find the word is {round(total_time_find_word,2)} seconds')
         print('')
         print(
-            f'The total time for the execution of the application is {total_application_time} seconds'
+            f'The total time for the execution of the application is {round(total_application_time, 2)} seconds'
         )
-        print(f'The total time to find the word is {total_time_find_word} seconds')
-    
+        times_data = (total_time_find_word, total_application_time, id_target_word)
+        database.update_data_game_table(times_data)
+        database.close_connection()
+
 class WordBankManagement:
     def __init__(self) -> None:
         """WordBankManagement class constructor
@@ -541,6 +593,7 @@ class WordBankManagement:
         return self.__list_of_words
 
 if __name__ == '__main__':
+    initial_application_time = time.time()
     user_name_api = config('USERNAME_API')
     password_api = config('PASSWORD_API')
     api_get_url = config('URL_API_GET')
@@ -553,4 +606,5 @@ if __name__ == '__main__':
     Play(
         user_name_api, password_api, 
         hostname_db, username_db, password_db, dbname,
-        api_get_url, api_post_url)
+        api_get_url, api_post_url, initial_application_time)
+   
