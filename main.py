@@ -1,4 +1,5 @@
 import copy
+from datetime import date
 import json
 from logging import exception
 import requests
@@ -15,7 +16,7 @@ class Database:
         try:
             cursor = self.cursor
             insert_data_game_table_query = '''INSERT INTO game 
-            (game_id, length_word, vowels, consonants) VALUES (%s, %s, %s, %s);
+            (token_api, number_vowels, number_consonants, length_word) VALUES (%s, %s, %s, %s);
             '''
             cursor.execute(insert_data_game_table_query, data)
             self.conn.commit()
@@ -24,7 +25,7 @@ class Database:
 
     def update_data_game_table(self, data: tuple) -> None:
         try:
-            add_datetime_gametable_query = '''UPDATE game SET time_to_find_word = %s, total_time = %s WHERE game_id = %s'''
+            add_datetime_gametable_query = '''UPDATE game SET time_to_find_word = %s, total_time = %s, win = %s WHERE token_api = %s'''
             cursor = self.cursor
             cursor.execute(add_datetime_gametable_query, data)
             self.conn.commit()
@@ -39,12 +40,35 @@ class Database:
         try:
             cursor = self.cursor
             insert_data_attempt_table_query = '''INSERT INTO attempt
-            (game_id, score, date, time, position_array, right_letters_in_wrong_positions, current_attemps, word_sent) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            (game_id, word_sent, score, date, time, current_attemps, position_array, right_letters_in_wrong_positions) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             '''
             cursor.execute(insert_data_attempt_table_query, data)
             self.conn.commit()
         except:
             print('No se pudo añadir los datos a la tabla attempt')
+
+    def search_data_game_table(self, token_game: str) :
+        try:   
+            cursor = self.cursor
+            search_data_game_table_query = '''SELECT game_id FROM game 
+            WHERE token_api = %s
+            '''
+            cursor.execute(search_data_game_table_query, (token_game,))
+            return list(cursor.fetchone())[0]
+        except:
+            print('No se encontro el juego especificado')
+
+    def win_game(self, token_api: str) -> str:
+           
+        cursor = self.cursor
+        id_game = self.search_data_game_table(token_api)
+        search_data_game_table_query = '''SELECT score FROM attempt 
+        WHERE score = 1.0 AND game_id = %s
+        '''
+        cursor.execute(search_data_game_table_query, (id_game,))
+        return list(cursor.fetchone())[0]
+        
+            # print('No se encontro el juego especificado')
 
 class WordleGame:
     def __init__(self, list_of_words: list) -> None:
@@ -447,7 +471,7 @@ class Play:
 
     def find_word(
             self, length_target_word: int, number_vowels: int, 
-            number_consonants: int, api_post_url: str, session, game_id: str, database: Database) -> None:
+            number_consonants: int, api_post_url: str, session, token_game: str, database: Database) -> None:
         """Find the target word
 
         Args:
@@ -473,15 +497,16 @@ class Play:
         currrent_attempt_word = attempt_data.get('current_attemps')#4
         # Make the five attempts allowed by the game to find the word
         while attempt_count < 5:
-            attempt_score =  attempt_data.get('score')
+            attempt_score =  round(attempt_data.get('score'),2)
             attempt_date = attempt_data.get('try_datetime').split('T')[0]
             attempt_time = attempt_data.get('try_datetime').split('T')[1]
-            position_array_attempt =str(set(map(lambda pos: 1 if pos else 0,position_array)))
+            position_array_attempt = list(map(lambda pos: 1 if pos else 0,position_array))
             if len(right_letters_in_wrong_positions) > 0:        
-                right_letters_in_wrong_positions_set = str(set(right_letters_in_wrong_positions))
+                right_letters_in_wrong_positions_set = list(right_letters_in_wrong_positions)
             else:
-                right_letters_in_wrong_positions_set = str({})
-            data_attempt_table = (game_id, attempt_score, attempt_date, attempt_time, position_array_attempt, right_letters_in_wrong_positions_set, currrent_attempt_word, attempt_word)        
+                right_letters_in_wrong_positions_set = list()
+            game_id = database.search_data_game_table(token_game)
+            data_attempt_table = (game_id, attempt_word, attempt_score, attempt_date, attempt_time, currrent_attempt_word, position_array_attempt, right_letters_in_wrong_positions_set)        
             database.insert_data_attempt_table(data_attempt_table)
             print(f'Attempt {currrent_attempt_word}: {attempt_word}')
             print(attempt_data)
@@ -541,7 +566,7 @@ class Play:
         number_of_vowels = word_data.get('vowels')
         number_of_consonants = word_data.get('consonants')
         database = Database(connection)
-        data = (id_target_word, length_target_word, number_of_vowels,         number_of_consonants)
+        data = (id_target_word, number_of_vowels, number_of_consonants, length_target_word)
         database.insert_data_game_table(data)
         # Play the game and find the target word
         self.find_word(length_target_word, number_of_vowels, number_of_consonants, api_post_url, session, id_target_word, database)
@@ -553,7 +578,9 @@ class Play:
         print(
             f'The total time for the execution of the application is {round(total_application_time, 2)} seconds'
         )
-        times_data = (total_time_find_word, total_application_time, id_target_word)
+        win_game = database.win_game(id_target_word)
+        win_game_bool = bool(win_game) 
+        times_data = (total_time_find_word, total_application_time, win_game_bool, id_target_word)
         database.update_data_game_table(times_data)
         database.close_connection()
 
